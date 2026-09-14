@@ -2,6 +2,8 @@
 
 [![Проверки](https://github.com/MatadoraYYY/Nexus-analityc/actions/workflows/ci.yml/badge.svg)](https://github.com/MatadoraYYY/Nexus-analityc/actions)
 
+**Рабочая версия:** https://nexus-analityc.duonuts.workers.dev
+
 NEXUS — полностью русскоязычный, воспроизводимый portfolio-проект аналитики SaaS-продукта. Он демонстрирует цепочку «синтетические данные → качество → преобразования → метрики и статистика → статический API → аналитическая панель → тестирование → безопасное размещение».
 
 > **Важно:** все данные и результаты синтетические. Они не описывают реальный бизнес и не содержат персональных данных.
@@ -54,7 +56,7 @@ site/api/v1/*.json
         ↓
 site/index.html + assets/app.js
         ↓
-Cloudflare Pages или GitHub Pages
+Cloudflare Workers Static Assets
 ```
 
 Подробности: [архитектура](docs/architecture.md), [внутреннее ТЗ](docs/specification.md), [происхождение данных](docs/lineage.md).
