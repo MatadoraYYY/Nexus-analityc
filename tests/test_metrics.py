@@ -16,3 +16,15 @@ def test_golden_business_metrics():
 
 def test_zero_churn_is_not_infinity():
     assert model_ltv(100, 0.8, 0) is None
+
+
+def test_missing_and_empty_denominators_return_none():
+    assert percent(0, 0) is None
+    assert drop_off(0, 0) is None
+    assert arpu(0, 0) is None
+    assert arppu(0, 0) is None
+
+
+def test_zero_revenue_with_existing_customer_is_zero():
+    assert arpu(0, 3) == 0
+    assert arppu(0, 2) == 0

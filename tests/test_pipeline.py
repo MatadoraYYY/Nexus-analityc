@@ -29,3 +29,23 @@ def test_data_to_api_integration(tmp_path):
     assert json.loads((api / "health.json").read_text(encoding="utf-8"))["status"] == "работает"
     features = json.loads((api / "features.json").read_text(encoding="utf-8"))["features"]
     assert all(0 <= item["adoption"] <= 100 for item in features)
+
+
+def test_pipeline_stops_on_critical_quality_error(tmp_path):
+    import pytest
+
+    data, api = tmp_path / "data", tmp_path / "api"
+    generate(data, users_count=20)
+    (data / "events.csv").unlink()
+    with pytest.raises(RuntimeError, match="Критические проверки"):
+        build(data, api)
+
+
+def test_all_api_resources_are_valid_json(tmp_path):
+    data, api = tmp_path / "data", tmp_path / "api"
+    generate(data, users_count=120)
+    build(data, api)
+    expected = {"health.json", "overview.json", "acquisition.json", "funnel.json", "cohorts.json", "revenue.json", "features.json", "experiment.json", "quality.json"}
+    assert {path.name for path in api.glob("*.json")} == expected
+    for path in api.glob("*.json"):
+        json.loads(path.read_text(encoding="utf-8"))
