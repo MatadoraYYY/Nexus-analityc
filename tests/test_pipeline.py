@@ -27,3 +27,5 @@ def test_data_to_api_integration(tmp_path):
     overview = build(data, api)
     assert overview["meta"]["synthetic"] is True
     assert json.loads((api / "health.json").read_text(encoding="utf-8"))["status"] == "работает"
+    features = json.loads((api / "features.json").read_text(encoding="utf-8"))["features"]
+    assert all(0 <= item["adoption"] <= 100 for item in features)
