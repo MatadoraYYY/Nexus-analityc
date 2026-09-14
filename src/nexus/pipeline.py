@@ -44,59 +44,31 @@ def build(data_dir: str | Path, api_dir: str | Path) -> dict[str, object]:
             feature_users[row["feature_name"]].add(row["user_id"])
     report_date = max(daily) if daily else None
     dau = len(daily.get(report_date, set())) if report_date else 0
-    wau = (
-        set().union(*(daily.get(report_date - timedelta(days=i), set()) for i in range(7)))
-        if report_date
-        else set()
-    )
-    mau = (
-        set().union(*(daily.get(report_date - timedelta(days=i), set()) for i in range(30)))
-        if report_date
-        else set()
-    )
+    wau = set().union(*(daily.get(report_date - timedelta(days=i), set()) for i in range(7))) if report_date else set()
+    mau = set().union(*(daily.get(report_date - timedelta(days=i), set()) for i in range(30))) if report_date else set()
     activated: set[str] = set()
     projects: set[str] = set()
     for uid, rows in user_events.items():
         registered = registrations[uid]
-        project_days = [
-            d
-            for n, d in rows
-            if n == "project_created" and registered <= d <= registered + timedelta(days=7)
-        ]
-        task_days = [
-            d
-            for n, d in rows
-            if n == "task_created" and registered <= d <= registered + timedelta(days=7)
-        ]
+        project_days = [d for n, d in rows if n == "project_created" and registered <= d <= registered + timedelta(days=7)]
+        task_days = [d for n, d in rows if n == "task_created" and registered <= d <= registered + timedelta(days=7)]
         if project_days:
             projects.add(uid)
         if any(p <= t for p in project_days for t in task_days):
             activated.add(uid)
     retention = {}
     for period in (1, 7, 14, 30):
-        eligible = {
-            u
-            for u, r in registrations.items()
-            if report_date and r <= report_date - timedelta(days=period)
-        }
-        returned = {
-            u
-            for u in eligible
-            if any(
-                n in active_names and d == registrations[u] + timedelta(days=period)
-                for n, d in user_events[u]
-            )
-        }
+        eligible = {u for u, r in registrations.items() if report_date and r <= report_date - timedelta(days=period)}
+        returned = {u for u in eligible if any(n in active_names and d == registrations[u] + timedelta(days=period) for n, d in user_events[u])}
         retention[f"D{period}"] = percent(len(returned), len(eligible))
     gross = sum(float(x["gross_amount"]) for x in payments)
     net = sum(float(x["gross_amount"]) - float(x["refund_amount"]) for x in payments)
     paying = {x["user_id"] for x in payments if x["status"] == "Оплачен"}
-    mrr = sum(
-        float(x["monthly_amount"]) for x in subscriptions if x["status"] == "Активна"
-    )
-    churn = safe_divide(
-        sum(x["status"] == "Отменена" for x in subscriptions), len(subscriptions)
-    )
+    mrr = sum(float(x["monthly_amount"]) for x in subscriptions if x["status"] == "Активна")
+    period_start = report_date.replace(day=1) if report_date else None
+    customers_at_start = {x["user_id"] for x in subscriptions if period_start and date.fromisoformat(x["started_at"]) < period_start and (not x["ended_at"] or date.fromisoformat(x["ended_at"]) >= period_start)}
+    cancelled_in_period = {x["user_id"] for x in subscriptions if period_start and x["ended_at"] and period_start <= date.fromisoformat(x["ended_at"]) <= report_date and x["user_id"] in customers_at_start}
+    churn = safe_divide(len(cancelled_in_period), len(customers_at_start))
     arpu_value = arpu(net, len(mau))
     ltv = model_ltv(arpu_value, 0.82, churn)
     cac = safe_divide(sum(float(x["amount"]) for x in spend), len(paying))
@@ -106,103 +78,55 @@ def build(data_dir: str | Path, api_dir: str | Path) -> dict[str, object]:
             day = report_date - timedelta(days=offset)
             series.append({"date": day.isoformat(), "dau": len(daily.get(day, set()))})
     overview = {
-        "meta": {
-            "application_version": "1.0.0",
-            "dataset_version": "1.0.0",
-            "pipeline_version": "1.0.0",
-            "metrics_version": "1.0.0",
-            "synthetic": True,
-            "report_date": report_date.isoformat() if report_date else None,
-        },
-        "metrics": {
-            "dau": dau,
-            "wau": len(wau),
-            "mau": len(mau),
-            "stickiness": percent(dau, len(mau)),
-            "activation_rate": percent(len(activated), len(users)),
-            "gross_revenue": gross,
-            "net_revenue": net,
-            "mrr": mrr,
-            "arpu": arpu_value,
-            "arppu": arppu(net, len(paying)),
-            "customer_churn": None if churn is None else churn * 100,
-            "cac": cac,
-            "ltv": ltv,
-            "ltv_cac": safe_divide(ltv, cac),
-        },
+        "meta": {"application_version": "1.0.0", "dataset_version": "1.0.0", "pipeline_version": "1.0.0", "metrics_version": "1.0.0", "synthetic": True, "report_date": report_date.isoformat() if report_date else None},
+        "metrics": {"dau": dau, "wau": len(wau), "mau": len(mau), "stickiness": percent(dau, len(mau)), "activation_rate": percent(len(activated), len(users)), "gross_revenue": gross, "net_revenue": net, "mrr": mrr, "arpu": arpu_value, "arppu": arppu(net, len(paying)), "customer_churn": None if churn is None else churn * 100, "cac": cac, "ltv": ltv, "ltv_cac": safe_divide(ltv, cac)},
         "retention": retention,
         "activity_series": series,
-        "insights": [
-            "Тестовая группа активируется чаще контрольной; статистическое решение приведено в разделе экспериментов.",
-            "Наблюдаемая связь использования функций и удержания не доказывает причинно-следственную связь.",
-        ],
+        "insights": ["Тестовая группа активируется чаще контрольной; статистическое решение приведено в разделе экспериментов.", "Наблюдаемая связь использования функций и удержания не доказывает причинно-следственную связь."],
     }
     channel_counts = Counter(x["channel"] for x in users)
     user_channel = {x["user_id"]: x["channel"] for x in users}
     paid_channels = Counter(user_channel[u] for u in paying)
-    acquisition = {
-        "channels": [
-            {
-                "channel": c,
-                "users": n,
-                "paying_users": paid_channels[c],
-                "paying_conversion": percent(paid_channels[c], n),
-            }
-            for c, n in channel_counts.items()
-        ]
-    }
-    funnel = {
-        "steps": [
-            {"name": "Регистрация", "users": len(users), "conversion": 100.0, "drop_off": 0.0},
-            {
-                "name": "Создание проекта",
-                "users": len(projects),
-                "conversion": percent(len(projects), len(users)),
-                "drop_off": drop_off(len(projects), len(users)),
-            },
-            {
-                "name": "Создание задачи",
-                "users": len(activated),
-                "conversion": percent(len(activated), len(projects)),
-                "drop_off": drop_off(len(activated), len(projects)),
-            },
-        ]
-    }
+    spend_by_channel = Counter()
+    for row in spend:
+        spend_by_channel[row["channel"]] += float(row["amount"])
+    acquisition = {"channels": [{"channel": c, "users": n, "paying_users": paid_channels[c], "paying_conversion": percent(paid_channels[c], n), "marketing_spend": spend_by_channel[c], "cac": safe_divide(spend_by_channel[c], paid_channels[c])} for c, n in channel_counts.items()]}
+    funnel = {"steps": [
+        {"name": "Регистрация", "users": len(users), "conversion": 100.0, "drop_off": 0.0},
+        {"name": "Создание проекта", "users": len(projects), "conversion": percent(len(projects), len(users)), "drop_off": drop_off(len(projects), len(users))},
+        {"name": "Создание задачи", "users": len(activated), "conversion": percent(len(activated), len(projects)), "drop_off": drop_off(len(activated), len(projects))},
+    ]}
     group = {x["user_id"]: x["variant"] for x in assignments}
     sizes, conversions = Counter(group.values()), Counter(group[u] for u in activated)
-    experiment = two_proportion_z_test(
-        conversions["Контрольная группа"],
-        sizes["Контрольная группа"],
-        conversions["Тестовая группа"],
-        sizes["Тестовая группа"],
-    ).to_dict()
-    experiment.update(
-        {
-            "method": "Двусторонний z-тест разности независимых долей",
-            "confidence_level": 0.95,
-            "warning": "Причинный вывод допустим только при корректной случайной рандомизации.",
-        }
-    )
-    features = {
-        "features": [
-            {
-                "feature": name,
-                "users": len(ids & mau),
-                "adoption": percent(len(ids & mau), len(mau)),
-            }
-            for name, ids in feature_users.items()
-        ]
+    experiment = two_proportion_z_test(conversions["Контрольная группа"], sizes["Контрольная группа"], conversions["Тестовая группа"], sizes["Тестовая группа"]).to_dict()
+    experiment.update({"method": "Двусторонний z-тест разности независимых долей", "confidence_level": 0.95, "warning": "Причинный вывод допустим только при корректной случайной рандомизации."})
+    features = {"features": [{"feature": name, "users": len(ids & mau), "adoption": percent(len(ids & mau), len(mau))} for name, ids in feature_users.items()]}
+    cohort_rows = []
+    cohort_groups: dict[str, set[str]] = defaultdict(set)
+    for uid, registered in registrations.items():
+        cohort_groups[registered.strftime("%Y-%m")].add(uid)
+    for cohort, ids in sorted(cohort_groups.items()):
+        row: dict[str, object] = {"cohort": cohort, "users": len(ids)}
+        for period in (1, 7, 14, 30):
+            eligible = {uid for uid in ids if report_date and registrations[uid] <= report_date - timedelta(days=period)}
+            returned = {uid for uid in eligible if any(name in active_names and day == registrations[uid] + timedelta(days=period) for name, day in user_events[uid])}
+            row[f"d{period}"] = percent(len(returned), len(eligible))
+        cohort_rows.append(row)
+    cohorts = {"cohorts": cohort_rows, "periods": ["D1", "D7", "D14", "D30"]}
+    monthly_revenue: dict[str, dict[str, float]] = defaultdict(lambda: {"gross": 0.0, "net": 0.0})
+    for payment in payments:
+        month = date.fromisoformat(payment["paid_at"]).strftime("%Y-%m")
+        monthly_revenue[month]["gross"] += float(payment["gross_amount"])
+        monthly_revenue[month]["net"] += float(payment["gross_amount"]) - float(payment["refund_amount"])
+    revenue = {
+        "series": [{"month": month, "gross_revenue": round(values["gross"], 2), "net_revenue": round(values["net"], 2)} for month, values in sorted(monthly_revenue.items())],
+        "metrics": {"gross_revenue": round(gross, 2), "net_revenue": round(net, 2), "mrr": round(mrr, 2), "arpu": arpu_value, "arppu": arppu(net, len(paying)), "customer_churn": None if churn is None else churn * 100, "customers_at_period_start": len(customers_at_start), "cancelled_customers": len(cancelled_in_period), "cac": cac, "ltv": ltv, "ltv_cac": safe_divide(ltv, cac)},
     }
     payloads = {
-        "overview.json": overview,
-        "acquisition.json": acquisition,
-        "funnel.json": funnel,
-        "features.json": features,
+        "overview.json": overview, "acquisition.json": acquisition, "funnel.json": funnel,
+        "cohorts.json": cohorts, "revenue.json": revenue, "features.json": features,
         "experiment.json": experiment,
-        "quality.json": {
-            "checks": [x.to_dict() for x in checks],
-            "critical_passed": not failed,
-        },
+        "quality.json": {"checks": [x.to_dict() for x in checks], "critical_passed": not failed},
         "health.json": {"status": "работает", "version": "1.0.0", "dataset": "синтетический"},
     }
     for name, payload in payloads.items():
